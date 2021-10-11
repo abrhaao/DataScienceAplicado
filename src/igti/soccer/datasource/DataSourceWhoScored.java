@@ -1,0 +1,168 @@
+package igti.soccer.datasource;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.PrintWriter;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.StringTokenizer;
+import java.util.TreeMap;
+
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
+import org.mileto.util.Security;
+
+public class DataSourceWhoScored implements DataSource {
+	
+	private String dsCampeonato;
+	private String dsTemporada;
+
+	
+	/**
+	 * O contrutor dos Data Sources não precisa ter uma assinatura padrão. Pode ter quantos campos forem necessários para o processamento dos dados
+	 * @param dsCampeonato
+	 * @param dsTemporada
+	 */
+	public DataSourceWhoScored(String dsCampeonato, String dsTemporada) {
+		super();
+		this.dsCampeonato = dsCampeonato;
+		this.dsTemporada = dsTemporada;
+	}
+
+	@Override
+	public TreeMap<String, URL> getClubes(URL urlEquipes) throws IOException {
+
+		Process proc = Runtime.getRuntime().exec( "curl " + urlEquipes.toString()  );
+		BufferedReader reader = new BufferedReader(new InputStreamReader(proc.getInputStream(), StandardCharsets.UTF_8));	//Formato varia conforme Liga
+
+		String line;
+		StringBuffer htmlContent = new StringBuffer();
+		while ((line = reader.readLine()) != null) {				
+			htmlContent.append(line);
+		}
+		Document docHtml = Jsoup.parse(htmlContent.toString());
+		PrintWriter writer = new PrintWriter("/tmp/hive/dados/paginas/" + "campeonato-whoscored-" + this.dsCampeonato.replace("/","") + ".html", "UTF-8");
+		writer.print( docHtml.outerHtml() );
+		writer.close();
+		
+
+		if ( urlEquipes.toString().contains("premierleague") ) {
+
+			Elements eClubes = docHtml.select("a.indexItem");
+			Map<String, URL> listaClubes = new TreeMap<String, URL>();
+			for (Element e: eClubes) {
+				String linkElenco = e.select("a").attr("href");
+				//System.out.println( "Aqui tenho que trocar >> " + linkElenco );
+				
+				//StringTokenizer str = new StringTokenizer(linkElenco, "/");
+				//String bufferExclude = new String("#");
+				//while ( str.hasMoreTokens() ) {
+				//	bufferExclude = str.nextToken();
+				//}
+				System.out.println( "Link clube >> " + linkElenco );
+
+				
+				//linkElenco = linkElenco.replaceAll(bufferExclude, this.dsCampeonato + "/temporada/" + this.dsTemporada);
+				
+				String[] clube = { e.select("h4[class=clubName]").text(), "https://www.premierleague.com" + linkElenco };
+				listaClubes.put( clube[0], new URL(clube[1]));
+			}
+
+			//int y = 99;
+			return (TreeMap<String, URL>)listaClubes;
+		}
+		
+		return null;
+	}
+
+	@Override
+	public TreeMap<String, URL> getAtletas(String nomeClube, URL urlAtletas, PrintWriter writer) throws IOException {
+		Process proc = Runtime.getRuntime().exec( "curl " + urlAtletas.toString()  );
+		BufferedReader reader = new BufferedReader(new InputStreamReader(proc.getInputStream(), StandardCharsets.UTF_8));
+
+		String line;
+		StringBuffer htmlContent = new StringBuffer();
+		while ((line = reader.readLine()) != null) {				
+			htmlContent.append(line);
+		}
+		Document docHtml = Jsoup.parse(htmlContent.toString());
+
+
+		try { 
+
+			//Connection con = DriverManager.getConnection("jdbc:hive2://localhost:10000/my", "abrhaao", "java");
+
+
+
+			/** TODO desenvolver com interfaces? **/
+			if ( urlAtletas.toString().contains("premierleague") ) {
+
+				Map<String, URL> listaJogadores = new TreeMap<String, URL>();
+				Elements eJogadores = docHtml.select("tr[class=Table2__tr Table2__tr--sm Table2__even]");			
+				for (Element e: eJogadores) {
+
+					try {
+
+						writer.print("0|");	//primeiro campo, Qlik nao pega
+						writer.print( e.select("span").get(2).text() + "|" + nomeClube + "|" + e.select("span").get(0).text() + "|");
+						//Elements caracteristicas = e.select("span[class=alignRight]");
+						Elements caracteristicas = e.select("span[class=tar]");	//mudou, cacete!!!!
+						StringBuffer dataCaracteristicas = new StringBuffer();
+						for ( int ix = 0; ix<caracteristicas.size(); ix++) {
+							String s = caracteristicas.get(ix).text(); 
+							if ( e.select("span").get(0).text().equals("G")) {
+								switch (ix) {
+								case 1: dataCaracteristicas.append("<Idade>" + s + "</Idade>"); break; 
+								case 2: dataCaracteristicas.append("<Jogos>" + s + "</Jogos>"); break; 
+								case 4:	dataCaracteristicas.append("<Defesas>" + s + "</Defesas>"); break;
+								case 5: dataCaracteristicas.append("<GolsSofridos>" + s + "</GolsSofridos>"); break; 
+								case 6: dataCaracteristicas.append("<Assistencias>" + s + "</Assistencias>"); break;
+								case 7: dataCaracteristicas.append("<Faltas>" + s + "</Faltas>"); break;
+								case 8: dataCaracteristicas.append("<FaltasSofridas>" + s + "</FaltasSofridas>"); break;
+								case 9: dataCaracteristicas.append("<CardsAmarelo>" + s + "</CardsAmarelo>"); break;
+								case 10: dataCaracteristicas.append("<CardsVermelho>" + s + "</CardsVermelho>"); break;
+								}
+							} else { 
+								switch (ix) {
+								case 1: dataCaracteristicas.append("<Idade>" + s + "</Idade>"); break; 
+								case 2: dataCaracteristicas.append("<Jogos>" + s + "</Jogos>"); break; 
+								case 4:	dataCaracteristicas.append("<Gols>" + s + "</Gols>"); break;																								
+								case 5: dataCaracteristicas.append("<Assistencias>" + s + "</Assistencias>"); break;
+								case 6: dataCaracteristicas.append("<Finalizacoes>" + s + "</Finalizacoes>"); break;
+								case 7: dataCaracteristicas.append("<FinalizacoesCertas>" + s + "</FinalizacoesCertas>"); break;
+								case 8: dataCaracteristicas.append("<Faltas>" + s + "</Faltas>"); break;
+								case 9: dataCaracteristicas.append("<FaltasSofridas>" + s + "</FaltasSofridas>"); break;
+								case 10: dataCaracteristicas.append("<CardsAmarelo>" + s + "</CardsAmarelo>"); break;
+								case 11: dataCaracteristicas.append("<CardsVermelho>" + s + "</CardsVermelho>"); break;
+								}
+							}
+						}
+						writer.println( dataCaracteristicas.toString() );
+
+
+					} catch (Exception sqle) { 
+						sqle.printStackTrace();
+					}
+				}
+
+				//con.close();
+				return (TreeMap<String, URL>)listaJogadores;
+			}
+		} catch (Exception sqle) {
+			sqle.printStackTrace();
+		}
+
+		return null;
+	}
+
+
+
+}
